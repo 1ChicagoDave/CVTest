@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Automap (browser)</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, sans-serif;
+      background: #111; color: #eee; padding: env(safe-area-inset-top) 12px 12px;
+    }
+    h1 { font-size: 1.1rem; margin: 12px 0; }
+    .stage { position: relative; width: 100%; max-width: 640px; margin: 0 auto; }
+    video, #overlay {
+      width: 100%; border-radius: 10px; background: #000; display: block;
+    }
+    #overlay { position: absolute; inset: 0; pointer-events: none; }
+    .controls { max-width: 640px; margin: 12px auto; display: grid; gap: 8px; }
+    input, button {
+      font-size: 1rem; padding: 10px 12px; border-radius: 8px; border: 1px solid #444;
+      background: #1c1c1c; color: #eee;
+    }
+    button { background: #2b6cb0; border-color: #2b6cb0; font-weight: 600; }
+    button:disabled { opacity: 0.5; }
+    #status { min-height: 1.4em; font-variant-numeric: tabular-nums; }
+    a#download { display: none; text-align: center; padding: 10px; background: #276749;
+      border-radius: 8px; color: #fff; text-decoration: none; font-weight: 600; }
+    small { color: #999; }
+  </style>
+</head>
+<body>
+  <h1>Automap &mdash; browser camera</h1>
+
+  <div class="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div class="controls">
+    <input id="ip" type="text" inputmode="decimal"
+           placeholder="Pixelblaze IP (e.g. 192.168.1.42)" />
+    <button id="startBtn" disabled>Start mapping</button>
+    <div id="status">Tap the page to enable the camera&hellip;</div>
+    <a id="download" download="map.json">Download map.json</a>
+    <small>Prop the phone steady so it sees all the LEDs. Frames are sent at 640&times;480
+      to match the detector. Camera needs HTTPS (or localhost).</small>
+  </div>
+
+  <!-- Hidden working canvas used to grab/downscale frames for sending. -->
+  <canvas id="capture" width="640" height="480" style="display:none"></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>
