@@ -147,3 +147,30 @@ def map_center(led_centers):
     if count == 0:
         return 0, 0
     return x_total // count, y_total // count
+
+
+def _distance(a, b):
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def cluster_center(points, tolerance, min_count):
+    """Confirm an LED position from repeated reads.
+
+    Returns the averaged center of the largest group of points that all lie
+    within `tolerance` pixels of a common member, provided that group has at
+    least `min_count` members; otherwise None. This gives redundancy / error
+    correction: a position is only accepted once several reads agree, and a
+    lone outlier read is discarded.
+    """
+    best = None
+    for seed in points:
+        group = [p for p in points if _distance(p, seed) <= tolerance]
+        if len(group) >= min_count and (best is None or len(group) > len(best)):
+            best = group
+    if best is None:
+        return None
+    n = len(best)
+    return (
+        int(round(sum(p[0] for p in best) / n)),
+        int(round(sum(p[1] for p in best) / n)),
+    )

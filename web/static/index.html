@@ -43,6 +43,8 @@
     .row > * { flex: 1; }
     label.check { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
     label.check input { width: auto; }
+    label.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: #bbb; }
+    label.field input { width: 100%; }
     #status { min-height: 1.4em; font-variant-numeric: tabular-nums; }
     #bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
     #bar > div { height: 100%; width: 0; background: #2b6cb0; transition: width .15s; }
@@ -70,11 +72,19 @@
     <div id="aimPanel" class="panel">
       <input id="ip" type="text" inputmode="decimal"
              placeholder="Pixelblaze IP (e.g. 192.168.1.42)" />
-      <label class="check"><input id="interactive" type="checkbox" checked />
-        Pause on misses (let me retry/skip)</label>
+      <div class="row">
+        <label class="field">Settle (ms)
+          <input id="settle" type="number" value="150" min="0" max="2000" step="10" /></label>
+        <label class="field">Confirm reads
+          <input id="confirm" type="number" value="2" min="1" max="5" /></label>
+        <label class="field">Cleanup passes
+          <input id="cleanup" type="number" value="3" min="0" max="6" /></label>
+      </div>
+      <label class="check"><input id="interactive" type="checkbox" />
+        Pause on each miss (manual retry/skip)</label>
       <button id="startBtn">Aim the camera, then Start mapping</button>
-      <small>Prop the phone steady so it sees all the LEDs. Frames are sent at
-        640&times;480 to match the detector. Camera needs HTTPS (or localhost).</small>
+      <small>Prop the phone steady so it sees all the LEDs. Higher settle/confirm =
+        slower but more reliable. Cleanup passes re-try missed LEDs at the end.</small>
     </div>
 
     <!-- Mapping in progress: stop/pause -->
