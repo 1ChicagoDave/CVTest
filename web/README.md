@@ -25,8 +25,9 @@ Pixelblaze's IP, and press **Start mapping**. The Automap pattern must be runnin
 on the Pixelblaze (see `../Pixelblaze/Automap.epe`). When finished, download
 `map.json`.
 
-To use a phone, expose the server over HTTPS — the recommended path is
-`tailscale serve https / http://localhost:8000` (see the vision doc).
+To use a phone, expose the server over HTTPS from the Docker VM and publish it
+on your tailnet — see **[DEPLOY.md](DEPLOY.md)** for the containerized +
+`tailscale serve` setup.
 
 ## How it works
 

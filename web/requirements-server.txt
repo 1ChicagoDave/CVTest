@@ -1,0 +1,8 @@
+# Server/container dependencies.
+# Uses opencv-python-headless (no GUI libs) since the bridge never opens a
+# window -- keeps the image small and avoids needing libGL in the container.
+fastapi
+uvicorn[standard]
+opencv-python-headless
+numpy
+pixelblaze-client
