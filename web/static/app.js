@@ -208,6 +208,9 @@ function scheduleReconnect() {
   }
   const delay = Math.min(1000 * 2 ** reconnectAttempts, 8000);
   reconnectAttempts++;
+  // A reconnect restarts the run from scratch, so clear any pause state;
+  // otherwise the reconnected run would silently withhold its first frame.
+  resetPauseUI();
   setStatus(`Disconnected &mdash; reconnecting (attempt ${reconnectAttempts}, restarts the map)&hellip;`);
   setTimeout(connect, delay);
 }
