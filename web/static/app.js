@@ -18,6 +18,12 @@ let runState = "idle";          // idle | mapping | done
 let pendingStart = null;        // the {start...} message, for reconnect resume
 let reconnectAttempts = 0;
 
+// Pause state. When paused we simply withhold frames; the server waits on the
+// next frame, so the run freezes until we send again (resume) or disconnect
+// (restart).
+let paused = false;
+let captureHeld = false;        // a capture was requested while paused
+
 // Orientation state (set when mapping finishes).
 let rawMap = [], mapCenter = [CAP_W / 2, CAP_H / 2], theta = 0;
 
@@ -26,9 +32,15 @@ function setProgress(done, total) {
   barFill.style.width = total ? `${(done / total) * 100}%` : "0";
 }
 function showPanel(name) {
-  for (const p of ["aimPanel", "retryPanel", "orientPanel"]) {
+  for (const p of ["aimPanel", "mappingPanel", "retryPanel", "orientPanel"]) {
     $(p).classList.toggle("active", p === name + "Panel");
   }
+}
+function resetPauseUI() {
+  paused = false;
+  captureHeld = false;
+  $("pausedRow").style.display = "none";
+  $("pauseBtn").style.display = "";
 }
 
 // ---- Camera ----------------------------------------------------------------
@@ -68,6 +80,12 @@ function grabJpeg() {
   }
   capCtx.drawImage(video, sx0, sy0, sw, sh, 0, 0, CAP_W, CAP_H);
   return new Promise((resolve) => capture.toBlob((b) => resolve(b), "image/jpeg", 0.7));
+}
+
+// Grab a frame and send it, in reply to a server "capture" request.
+async function sendFrame() {
+  const blob = await grabJpeg();
+  if (ws && ws.readyState === 1) ws.send(await blob.arrayBuffer());
 }
 
 // ---- Overlay ---------------------------------------------------------------
@@ -134,12 +152,12 @@ function connect() {
       case "hello":
         setStatus(`Mapping ${msg.pixelCount} LEDs&hellip;`);
         setProgress(0, msg.pixelCount);
+        showPanel("mapping");
         break;
-      case "capture": {
-        const blob = await grabJpeg();
-        ws.send(await blob.arrayBuffer());
+      case "capture":
+        if (paused) { captureHeld = true; }   // hold until resume
+        else { await sendFrame(); }
         break;
-      }
       case "retry_prompt":
         $("retryMsg").textContent = `Couldn't find LED ${msg.pixel + 1}.`;
         showPanel("retry");
@@ -148,11 +166,12 @@ function connect() {
         setStatus(`Pixel ${msg.pixel + 1} of ${msg.total}`);
         setProgress(msg.pixel + 1, msg.total);
         drawOverlay(msg.centers, false);
-        showPanel(""); // hide retry panel if it was up
+        if (!paused) showPanel("mapping"); // back from a retry prompt
         break;
       case "done":
         runState = "done";
         pendingStart = null;
+        resetPauseUI();
         rawMap = msg.map;
         mapCenter = msg.center || [CAP_W / 2, CAP_H / 2];
         theta = 0;
@@ -166,6 +185,7 @@ function connect() {
       case "error":
         runState = "idle";
         pendingStart = null;
+        resetPauseUI();
         setStatus("Error: " + msg.message);
         showPanel("aim");
         break;
@@ -202,6 +222,7 @@ $("startBtn").addEventListener("click", () => {
   pendingStart = { type: "start", ip, interactive: interactiveBox.checked };
   runState = "mapping";
   reconnectAttempts = 0;
+  resetPauseUI();
   setStatus("Connecting&hellip;");
   connect();
 });
@@ -209,12 +230,37 @@ $("startBtn").addEventListener("click", () => {
 $("retryBtn").addEventListener("click", () => {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "retry" }));
   setStatus("Retrying&hellip;");
-  showPanel("");
+  showPanel("mapping");
 });
 $("skipBtn").addEventListener("click", () => {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "skip" }));
   setStatus("Skipped.");
-  showPanel("");
+  showPanel("mapping");
+});
+
+// Pause: withhold frames so the run freezes. Splits the wide button into
+// Resume / Restart.
+$("pauseBtn").addEventListener("click", () => {
+  paused = true;
+  $("pauseBtn").style.display = "none";
+  $("pausedRow").style.display = "";
+  setStatus("Paused. Adjust if needed, then Resume or Restart.");
+});
+$("resumeBtn").addEventListener("click", () => {
+  paused = false;
+  $("pausedRow").style.display = "none";
+  $("pauseBtn").style.display = "";
+  setStatus("Resuming&hellip;");
+  if (captureHeld) { captureHeld = false; sendFrame(); } // answer the held request
+});
+// Restart: abort this run and go back to the aim screen (does NOT auto-start).
+$("abortBtn").addEventListener("click", () => {
+  runState = "idle";          // prevents auto-reconnect on close
+  pendingStart = null;
+  resetPauseUI();
+  if (ws) { try { ws.close(); } catch (e) {} }
+  setStatus("Mapping stopped. Aim the camera, then Start mapping.");
+  showPanel("aim");
 });
 
 $("rotLeft").addEventListener("click", () => {

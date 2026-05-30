@@ -139,7 +139,13 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
             except Exception:
                 pass
         finally:
+            # Always turn the LEDs off on exit (normal finish, disconnect, or
+            # an aborted/paused-then-stopped run) so none are left stuck on.
             if controller is not None:
+                try:
+                    await asyncio.to_thread(controller.all_off)
+                except Exception:
+                    pass
                 await asyncio.to_thread(controller.close)
 
     # Serve the front-end at / (mounted last so /ws takes precedence).

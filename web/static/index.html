@@ -69,6 +69,15 @@
         640&times;480 to match the detector. Camera needs HTTPS (or localhost).</small>
     </div>
 
+    <!-- Mapping in progress: stop/pause -->
+    <div id="mappingPanel" class="panel">
+      <button id="pauseBtn" class="secondary">&#x23F8; Stop / Pause</button>
+      <div class="row" id="pausedRow" style="display:none">
+        <button id="resumeBtn">Resume Mapping</button>
+        <button id="abortBtn" class="secondary">Restart Mapping</button>
+      </div>
+    </div>
+
     <!-- Retry / skip on a miss -->
     <div id="retryPanel" class="panel">
       <div class="prompt" id="retryMsg">Couldn't find this LED.</div>
