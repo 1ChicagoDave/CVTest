@@ -35,7 +35,11 @@ function showPanel(name) {
 async function enableCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: {
+        facingMode: "environment",
+        aspectRatio: { ideal: 4 / 3 },
+        width: { ideal: 1280 }, height: { ideal: 960 },
+      },
       audio: false,
     });
     video.srcObject = stream;
@@ -50,32 +54,42 @@ document.body.addEventListener("click", () => {
   if (!video.srcObject) enableCamera();
 });
 
+// Grab the current video frame, center-cropped to 4:3 (no stretching) and
+// scaled to CAP_W x CAP_H. Cropping to 4:3 matches the video's object-fit:cover
+// so the dots line up with what's on screen, and avoids distorting the map.
 function grabJpeg() {
-  capCtx.drawImage(video, 0, 0, CAP_W, CAP_H);
+  const vw = video.videoWidth || CAP_W, vh = video.videoHeight || CAP_H;
+  const targetAR = CAP_W / CAP_H;
+  let sw, sh, sx0, sy0;
+  if (vw / vh > targetAR) {        // wider than 4:3 -> crop the sides
+    sh = vh; sw = vh * targetAR; sx0 = (vw - sw) / 2; sy0 = 0;
+  } else {                         // taller than 4:3 -> crop top/bottom
+    sw = vw; sh = vw / targetAR; sx0 = 0; sy0 = (vh - sh) / 2;
+  }
+  capCtx.drawImage(video, sx0, sy0, sw, sh, 0, 0, CAP_W, CAP_H);
   return new Promise((resolve) => capture.toBlob((b) => resolve(b), "image/jpeg", 0.7));
 }
 
 // ---- Overlay ---------------------------------------------------------------
+// The overlay canvas bitmap is a fixed CAP_W x CAP_H and CSS scales it to fit
+// the 4:3 stage, so centers (in capture coordinates) can be drawn directly.
 function drawOverlay(centers, withCrosshair) {
-  overlay.width = overlay.clientWidth;
-  overlay.height = overlay.clientHeight;
-  const sx = overlay.width / CAP_W, sy = overlay.height / CAP_H;
-  ovCtx.clearRect(0, 0, overlay.width, overlay.height);
+  ovCtx.clearRect(0, 0, CAP_W, CAP_H);
   if (withCrosshair) {
     ovCtx.strokeStyle = "#c83232";
-    ovCtx.lineWidth = 1;
-    const cx = mapCenter[0] * sx, cy = mapCenter[1] * sy;
+    ovCtx.lineWidth = 2;
+    const cx = mapCenter[0], cy = mapCenter[1];
     ovCtx.beginPath();
-    ovCtx.moveTo(cx - 30, cy); ovCtx.lineTo(cx + 30, cy);
-    ovCtx.moveTo(cx, cy - 30); ovCtx.lineTo(cx, cy + 30);
+    ovCtx.moveTo(cx - 40, cy); ovCtx.lineTo(cx + 40, cy);
+    ovCtx.moveTo(cx, cy - 40); ovCtx.lineTo(cx, cy + 40);
     ovCtx.stroke();
   }
   ovCtx.strokeStyle = "#64ff64";
-  ovCtx.lineWidth = 1.5;
+  ovCtx.lineWidth = 2;
   for (const [x, y] of centers) {
     if (x < 0 && y < 0) continue;
     ovCtx.beginPath();
-    ovCtx.arc(x * sx, y * sy, 6, 0, Math.PI * 2);
+    ovCtx.arc(x, y, 7, 0, Math.PI * 2);
     ovCtx.stroke();
   }
 }
