@@ -1,0 +1,12 @@
+# Run the Automap bridge in the laptop's Docker VM.
+#
+#   docker compose up -d --build
+#
+# network_mode: host is important: it lets the container reach the Pixelblaze on
+# the LAN (ws://<pixelblaze-ip>:81) and exposes the server on the VM's own
+# :8000, which `tailscale serve` then publishes to the tailnet. See DEPLOY.md.
+services:
+  automap:
+    build: .
+    network_mode: host
+    restart: unless-stopped

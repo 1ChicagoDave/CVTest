@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Automap (browser)</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, sans-serif;
+      background: #111; color: #eee; padding: env(safe-area-inset-top) 12px 12px;
+    }
+    h1 { font-size: 1.1rem; margin: 12px 0; }
+    /* Fixed 4:3 box (matches the 640x480 capture) so the layout is stable
+       before and after the camera loads, and the overlay aligns with the video. */
+    .stage {
+      position: relative; width: 100%; max-width: 640px; margin: 0 auto;
+      aspect-ratio: 4 / 3; background: #000; border-radius: 10px; overflow: hidden;
+    }
+    video, #overlay {
+      position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    }
+    video { object-fit: cover; }            /* center-crop to the 4:3 box */
+    #overlay { pointer-events: none; }       /* transparent: dots only, no fill */
+    .controls { max-width: 640px; margin: 12px auto; display: grid; gap: 8px; }
+    input, button {
+      font-size: 1rem; padding: 10px 12px; border-radius: 8px; border: 1px solid #444;
+      background: #1c1c1c; color: #eee;
+    }
+    button { background: #2b6cb0; border-color: #2b6cb0; font-weight: 600; }
+    button.secondary { background: #2d3748; border-color: #4a5568; }
+    button:disabled { opacity: 0.5; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    label.check { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+    label.check input { width: auto; }
+    #status { min-height: 1.4em; font-variant-numeric: tabular-nums; }
+    #bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+    #bar > div { height: 100%; width: 0; background: #2b6cb0; transition: width .15s; }
+    .panel { display: none; gap: 8px; }
+    .panel.active { display: grid; }
+    a#download { display: block; text-align: center; padding: 10px; background: #276749;
+      border-radius: 8px; color: #fff; text-decoration: none; font-weight: 600; }
+    small { color: #999; }
+    .prompt { background: #4a2c2c; border: 1px solid #a44; padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Automap &mdash; browser camera</h1>
+
+  <div class="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay" width="640" height="480"></canvas>
+  </div>
+
+  <div class="controls">
+    <div id="status">Tap the page to enable the camera&hellip;</div>
+    <div id="bar"><div></div></div>
+
+    <!-- Aim & start -->
+    <div id="aimPanel" class="panel">
+      <input id="ip" type="text" inputmode="decimal"
+             placeholder="Pixelblaze IP (e.g. 192.168.1.42)" />
+      <label class="check"><input id="interactive" type="checkbox" checked />
+        Pause on misses (let me retry/skip)</label>
+      <button id="startBtn">Aim the camera, then Start mapping</button>
+      <small>Prop the phone steady so it sees all the LEDs. Frames are sent at
+        640&times;480 to match the detector. Camera needs HTTPS (or localhost).</small>
+    </div>
+
+    <!-- Mapping in progress: stop/pause -->
+    <div id="mappingPanel" class="panel">
+      <button id="pauseBtn" class="secondary">&#x23F8; Stop / Pause</button>
+      <div class="row" id="pausedRow" style="display:none">
+        <button id="resumeBtn">Resume Mapping</button>
+        <button id="abortBtn" class="secondary">Restart Mapping</button>
+      </div>
+    </div>
+
+    <!-- Retry / skip on a miss -->
+    <div id="retryPanel" class="panel">
+      <div class="prompt" id="retryMsg">Couldn't find this LED.</div>
+      <div class="row">
+        <button id="retryBtn">Retry</button>
+        <button id="skipBtn" class="secondary">Skip (mark missing)</button>
+      </div>
+    </div>
+
+    <!-- Orient & save -->
+    <div id="orientPanel" class="panel">
+      <div class="row">
+        <button id="rotLeft" class="secondary">&#x21ba; Rotate left</button>
+        <button id="rotRight" class="secondary">Rotate right &#x21bb;</button>
+      </div>
+      <input id="rotSlider" type="range" min="-180" max="180" value="0" step="1" />
+      <a id="download" download="map.json">Download map.json</a>
+      <button id="restartBtn" class="secondary">Map again</button>
+    </div>
+  </div>
+
+  <canvas id="capture" width="640" height="480" style="display:none"></canvas>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -394,11 +394,11 @@ if __name__ == '__main__':
     print("Automap CV Research Version v0.1.0")
     print("Copyright (c) 2024 by ZRanger1. All rights reserved.")
 
-    ip = sys.argv[1]
-    if ip is None:
-        print("Usage: python Automap.py <Pixelblaze IP Address>")
-        print("  For example: python Automap.py 192.168.1.42")
+    if len(sys.argv) < 2:
+        print("Usage: python CVTest.py <Pixelblaze IP Address>")
+        print("  For example: python CVTest.py 192.168.1.42")
         exit(1)
+    ip = sys.argv[1]
 
     print("Note: Camera initialization may take up to a minute. Please be patient.")
     print("The camera calibration window will appear when initialization is complete.")

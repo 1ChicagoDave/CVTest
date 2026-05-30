@@ -1,0 +1,5 @@
+# Bridge server dependencies (Python 3.10+)
+# Reuses the root project's OpenCV/Pixelblaze deps plus a web stack.
+-r ../requirements.txt
+fastapi
+uvicorn[standard]

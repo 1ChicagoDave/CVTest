@@ -1,0 +1,5 @@
+# CVTest dependencies (Python 3.10 or later)
+# Install with:  pip install -r requirements.txt
+opencv-python
+pixelblaze-client
+numpy
