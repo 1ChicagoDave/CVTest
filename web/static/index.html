@@ -23,11 +23,21 @@
       background: #1c1c1c; color: #eee;
     }
     button { background: #2b6cb0; border-color: #2b6cb0; font-weight: 600; }
+    button.secondary { background: #2d3748; border-color: #4a5568; }
     button:disabled { opacity: 0.5; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    label.check { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+    label.check input { width: auto; }
     #status { min-height: 1.4em; font-variant-numeric: tabular-nums; }
-    a#download { display: none; text-align: center; padding: 10px; background: #276749;
+    #bar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+    #bar > div { height: 100%; width: 0; background: #2b6cb0; transition: width .15s; }
+    .panel { display: none; gap: 8px; }
+    .panel.active { display: grid; }
+    a#download { display: block; text-align: center; padding: 10px; background: #276749;
       border-radius: 8px; color: #fff; text-decoration: none; font-weight: 600; }
     small { color: #999; }
+    .prompt { background: #4a2c2c; border: 1px solid #a44; padding: 10px; border-radius: 8px; }
   </style>
 </head>
 <body>
@@ -39,16 +49,41 @@
   </div>
 
   <div class="controls">
-    <input id="ip" type="text" inputmode="decimal"
-           placeholder="Pixelblaze IP (e.g. 192.168.1.42)" />
-    <button id="startBtn" disabled>Start mapping</button>
     <div id="status">Tap the page to enable the camera&hellip;</div>
-    <a id="download" download="map.json">Download map.json</a>
-    <small>Prop the phone steady so it sees all the LEDs. Frames are sent at 640&times;480
-      to match the detector. Camera needs HTTPS (or localhost).</small>
+    <div id="bar"><div></div></div>
+
+    <!-- Aim & start -->
+    <div id="aimPanel" class="panel">
+      <input id="ip" type="text" inputmode="decimal"
+             placeholder="Pixelblaze IP (e.g. 192.168.1.42)" />
+      <label class="check"><input id="interactive" type="checkbox" checked />
+        Pause on misses (let me retry/skip)</label>
+      <button id="startBtn">Aim the camera, then Start mapping</button>
+      <small>Prop the phone steady so it sees all the LEDs. Frames are sent at
+        640&times;480 to match the detector. Camera needs HTTPS (or localhost).</small>
+    </div>
+
+    <!-- Retry / skip on a miss -->
+    <div id="retryPanel" class="panel">
+      <div class="prompt" id="retryMsg">Couldn't find this LED.</div>
+      <div class="row">
+        <button id="retryBtn">Retry</button>
+        <button id="skipBtn" class="secondary">Skip (mark missing)</button>
+      </div>
+    </div>
+
+    <!-- Orient & save -->
+    <div id="orientPanel" class="panel">
+      <div class="row">
+        <button id="rotLeft" class="secondary">&#x21ba; Rotate left</button>
+        <button id="rotRight" class="secondary">Rotate right &#x21bb;</button>
+      </div>
+      <input id="rotSlider" type="range" min="-180" max="180" value="0" step="1" />
+      <a id="download" download="map.json">Download map.json</a>
+      <button id="restartBtn" class="secondary">Map again</button>
+    </div>
   </div>
 
-  <!-- Hidden working canvas used to grab/downscale frames for sending. -->
   <canvas id="capture" width="640" height="480" style="display:none"></canvas>
 
   <script src="app.js"></script>

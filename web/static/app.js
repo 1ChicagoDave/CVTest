@@ -1,26 +1,37 @@
-// Browser side of Automap: capture frames from the phone camera and send them
-// to the bridge server, which does the detection and drives the Pixelblaze.
+// Browser side of Automap: capture frames from the phone camera, send them to
+// the bridge server (which detects + drives the Pixelblaze), then let the user
+// orient and save the resulting map. Includes retry/skip and reconnect handling.
 
 const CAP_W = 640, CAP_H = 480; // must match the detector's tuned frame size
+const ROT_STEP = 0.0628;        // ~3.6deg per tap, same as the desktop a/d keys
 
-const video = document.getElementById("video");
-const overlay = document.getElementById("overlay");
-const capture = document.getElementById("capture");
-const startBtn = document.getElementById("startBtn");
-const ipInput = document.getElementById("ip");
-const statusEl = document.getElementById("status");
-const downloadEl = document.getElementById("download");
+const $ = (id) => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), capture = $("capture");
+const statusEl = $("status"), barFill = $("bar").firstElementChild;
+const ipInput = $("ip"), interactiveBox = $("interactive");
 
 const capCtx = capture.getContext("2d", { willReadFrequently: true });
 const ovCtx = overlay.getContext("2d");
 
 let ws = null;
+let runState = "idle";          // idle | mapping | done
+let pendingStart = null;        // the {start...} message, for reconnect resume
+let reconnectAttempts = 0;
 
-function setStatus(msg) { statusEl.textContent = msg; }
+// Orientation state (set when mapping finishes).
+let rawMap = [], mapCenter = [CAP_W / 2, CAP_H / 2], theta = 0;
 
-// Remember the last IP used.
-ipInput.value = localStorage.getItem("pb_ip") || "";
+function setStatus(html) { statusEl.innerHTML = html; }
+function setProgress(done, total) {
+  barFill.style.width = total ? `${(done / total) * 100}%` : "0";
+}
+function showPanel(name) {
+  for (const p of ["aimPanel", "retryPanel", "orientPanel"]) {
+    $(p).classList.toggle("active", p === name + "Panel");
+  }
+}
 
+// ---- Camera ----------------------------------------------------------------
 async function enableCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -29,31 +40,36 @@ async function enableCamera() {
     });
     video.srcObject = stream;
     await video.play();
-    startBtn.disabled = false;
-    setStatus("Camera ready. Enter the Pixelblaze IP and start.");
+    setStatus("Camera ready. Aim it, enter the Pixelblaze IP, then Start.");
+    showPanel("aim");
   } catch (err) {
     setStatus("Camera error: " + err.message + " (HTTPS or localhost required)");
   }
 }
-// iOS requires a user gesture before camera access.
 document.body.addEventListener("click", () => {
   if (!video.srcObject) enableCamera();
-}, { once: false });
+});
 
-// Grab the current video frame, downscaled to CAP_W x CAP_H, as a JPEG Blob.
 function grabJpeg() {
   capCtx.drawImage(video, 0, 0, CAP_W, CAP_H);
-  return new Promise((resolve) =>
-    capture.toBlob((b) => resolve(b), "image/jpeg", 0.7)
-  );
+  return new Promise((resolve) => capture.toBlob((b) => resolve(b), "image/jpeg", 0.7));
 }
 
-function drawOverlay(centers) {
-  // Overlay canvas is sized to its displayed pixels; scale from capture space.
+// ---- Overlay ---------------------------------------------------------------
+function drawOverlay(centers, withCrosshair) {
   overlay.width = overlay.clientWidth;
   overlay.height = overlay.clientHeight;
   const sx = overlay.width / CAP_W, sy = overlay.height / CAP_H;
   ovCtx.clearRect(0, 0, overlay.width, overlay.height);
+  if (withCrosshair) {
+    ovCtx.strokeStyle = "#c83232";
+    ovCtx.lineWidth = 1;
+    const cx = mapCenter[0] * sx, cy = mapCenter[1] * sy;
+    ovCtx.beginPath();
+    ovCtx.moveTo(cx - 30, cy); ovCtx.lineTo(cx + 30, cy);
+    ovCtx.moveTo(cx, cy - 30); ovCtx.lineTo(cx, cy + 30);
+    ovCtx.stroke();
+  }
   ovCtx.strokeStyle = "#64ff64";
   ovCtx.lineWidth = 1.5;
   for (const [x, y] of centers) {
@@ -64,25 +80,38 @@ function drawOverlay(centers) {
   }
 }
 
-function offerDownload(map) {
-  const blob = new Blob([JSON.stringify(map)], { type: "application/json" });
-  downloadEl.href = URL.createObjectURL(blob);
-  downloadEl.style.display = "block";
+// ---- Rotation (mirrors detection.rotate_led_centers) -----------------------
+function rotateCenters(centers, cx, cy, rad) {
+  return centers.map(([x, y]) => {
+    if (x < 0 && y < 0) return [-1, -1];
+    const dx = x - cx, dy = y - cy;
+    return [
+      Math.round(dx * Math.cos(rad) - dy * Math.sin(rad) + cx),
+      Math.round(dx * Math.sin(rad) + dy * Math.cos(rad) + cy),
+    ];
+  });
 }
 
-startBtn.addEventListener("click", () => {
-  const ip = ipInput.value.trim();
-  if (!ip) { setStatus("Enter the Pixelblaze IP first."); return; }
-  localStorage.setItem("pb_ip", ip);
+function refreshOriented() {
+  const oriented = rotateCenters(rawMap, mapCenter[0], mapCenter[1], theta);
+  drawOverlay(oriented, true);
+  const blob = new Blob([JSON.stringify(oriented)], { type: "application/json" });
+  $("download").href = URL.createObjectURL(blob);
+}
 
+// ---- WebSocket / mapping ---------------------------------------------------
+function wsUrl() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  return `${proto}://${location.host}/ws`;
+}
+
+function connect() {
+  ws = new WebSocket(wsUrl());
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
-    startBtn.disabled = true;
-    setStatus("Connected. Starting&hellip;");
-    ws.send(JSON.stringify({ type: "start", ip }));
+    reconnectAttempts = 0;
+    if (pendingStart) ws.send(JSON.stringify(pendingStart));
   };
 
   ws.onmessage = async (ev) => {
@@ -90,30 +119,106 @@ startBtn.addEventListener("click", () => {
     switch (msg.type) {
       case "hello":
         setStatus(`Mapping ${msg.pixelCount} LEDs&hellip;`);
+        setProgress(0, msg.pixelCount);
         break;
       case "capture": {
         const blob = await grabJpeg();
         ws.send(await blob.arrayBuffer());
         break;
       }
+      case "retry_prompt":
+        $("retryMsg").textContent = `Couldn't find LED ${msg.pixel + 1}.`;
+        showPanel("retry");
+        break;
       case "progress":
         setStatus(`Pixel ${msg.pixel + 1} of ${msg.total}`);
-        drawOverlay(msg.centers);
+        setProgress(msg.pixel + 1, msg.total);
+        drawOverlay(msg.centers, false);
+        showPanel(""); // hide retry panel if it was up
         break;
       case "done":
+        runState = "done";
+        pendingStart = null;
+        rawMap = msg.map;
+        mapCenter = msg.center || [CAP_W / 2, CAP_H / 2];
+        theta = 0;
+        $("rotSlider").value = 0;
         setStatus(`Done. ${msg.map.length} LEDs` +
-          (msg.missed ? ` (${msg.missed} not found, marked [-1,-1])` : ""));
-        drawOverlay(msg.map);
-        offerDownload(msg.map);
-        startBtn.disabled = false;
+          (msg.missed ? ` (${msg.missed} not found, marked [-1,-1])` : "") +
+          ". Rotate to orient, then download.");
+        showPanel("orient");
+        refreshOriented();
         break;
       case "error":
+        runState = "idle";
+        pendingStart = null;
         setStatus("Error: " + msg.message);
-        startBtn.disabled = false;
+        showPanel("aim");
         break;
     }
   };
 
-  ws.onerror = () => setStatus("WebSocket error.");
-  ws.onclose = () => { if (startBtn.disabled) startBtn.disabled = false; };
+  ws.onclose = () => {
+    if (runState === "mapping") scheduleReconnect();
+  };
+  ws.onerror = () => { /* onclose will handle reconnect */ };
+}
+
+function scheduleReconnect() {
+  if (reconnectAttempts >= 5) {
+    runState = "idle";
+    pendingStart = null;
+    setStatus("Disconnected. Tap Start to try again.");
+    showPanel("aim");
+    return;
+  }
+  const delay = Math.min(1000 * 2 ** reconnectAttempts, 8000);
+  reconnectAttempts++;
+  setStatus(`Disconnected &mdash; reconnecting (attempt ${reconnectAttempts}, restarts the map)&hellip;`);
+  setTimeout(connect, delay);
+}
+
+// ---- Controls --------------------------------------------------------------
+ipInput.value = localStorage.getItem("pb_ip") || "";
+
+$("startBtn").addEventListener("click", () => {
+  const ip = ipInput.value.trim();
+  if (!ip) { setStatus("Enter the Pixelblaze IP first."); return; }
+  localStorage.setItem("pb_ip", ip);
+  pendingStart = { type: "start", ip, interactive: interactiveBox.checked };
+  runState = "mapping";
+  reconnectAttempts = 0;
+  setStatus("Connecting&hellip;");
+  connect();
+});
+
+$("retryBtn").addEventListener("click", () => {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "retry" }));
+  setStatus("Retrying&hellip;");
+  showPanel("");
+});
+$("skipBtn").addEventListener("click", () => {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "skip" }));
+  setStatus("Skipped.");
+  showPanel("");
+});
+
+$("rotLeft").addEventListener("click", () => {
+  theta -= ROT_STEP;
+  $("rotSlider").value = Math.round((theta * 180) / Math.PI);
+  refreshOriented();
+});
+$("rotRight").addEventListener("click", () => {
+  theta += ROT_STEP;
+  $("rotSlider").value = Math.round((theta * 180) / Math.PI);
+  refreshOriented();
+});
+$("rotSlider").addEventListener("input", (e) => {
+  theta = (Number(e.target.value) * Math.PI) / 180;
+  refreshOriented();
+});
+$("restartBtn").addEventListener("click", () => {
+  runState = "idle";
+  setStatus("Aim the camera, then Start mapping.");
+  showPanel("aim");
 });

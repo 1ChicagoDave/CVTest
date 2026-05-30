@@ -7,14 +7,16 @@ Pixelblaze is driven on the LAN.
 WebSocket protocol (text frames are JSON, binary frames are JPEG images):
 
   client -> server
-    {"type": "start", "ip": "<pixelblaze-ip>"}
+    {"type": "start", "ip": "<pixelblaze-ip>", "interactive": bool}
     <binary JPEG>                         # sent in reply to a "capture" request
+    {"type": "retry"} | {"type": "skip"}  # reply to a "retry_prompt" (interactive)
 
   server -> client
     {"type": "hello", "pixelCount": N}
     {"type": "capture", "purpose": "background"|"lit", "pixel": n}
+    {"type": "retry_prompt", "pixel": n}  # a miss; interactive mode only
     {"type": "progress", "pixel": n, "total": N, "centers": [[x,y], ...]}
-    {"type": "done", "map": [[x,y], ...], "missed": k}
+    {"type": "done", "map": [[x,y], ...], "missed": k, "center": [cx, cy]}
     {"type": "error", "message": "..."}
 """
 from __future__ import annotations
@@ -61,6 +63,10 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
                 )
                 return
 
+            # When interactive, pause on a miss and let the user retry or skip;
+            # otherwise auto-skip (tag [-1,-1]) like the desktop tool.
+            interactive = bool(start.get("interactive", False))
+
             # Hardware control is blocking; keep it off the event loop.
             controller = await asyncio.to_thread(app.state.controller_factory, ip)
             count = await asyncio.to_thread(controller.pixel_count)
@@ -77,23 +83,33 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
                 data = await websocket.receive_bytes()
                 return frame_to_grayscale(data)
 
-            for n in range(count):
-                # Background frame with everything off.
+            async def capture_and_detect(pixel: int):
+                # Background frame with everything off, then the lit LED.
                 await asyncio.to_thread(controller.all_off)
                 await asyncio.sleep(app.state.settle_seconds)
                 background = await grab("background", -1)
-
-                # Light the target LED and capture it.
-                await asyncio.to_thread(controller.light, n)
+                await asyncio.to_thread(controller.light, pixel)
                 await asyncio.sleep(app.state.settle_seconds)
-                lit = await grab("lit", n)
-
+                lit = await grab("lit", pixel)
                 center, _info = detector.detect_pixel(background, lit)
-                if center is None:
+                return center
+
+            for n in range(count):
+                while True:
+                    center = await capture_and_detect(n)
+                    if center is not None:
+                        centers.append([int(center[0]), int(center[1])])
+                        break
+
+                    # Miss. In interactive mode, ask the user what to do.
+                    if interactive:
+                        await websocket.send_json({"type": "retry_prompt", "pixel": n})
+                        resp = await websocket.receive_json()
+                        if resp.get("type") == "retry":
+                            continue  # re-light, re-capture, re-detect
                     centers.append([-1, -1])
                     missed += 1
-                else:
-                    centers.append([int(center[0]), int(center[1])])
+                    break
 
                 await websocket.send_json(
                     {
