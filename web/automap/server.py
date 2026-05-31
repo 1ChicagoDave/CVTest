@@ -7,7 +7,11 @@ Pixelblaze is driven on the LAN.
 WebSocket protocol (text frames are JSON, binary frames are JPEG images):
 
   client -> server
-    {"type": "start", "ip": "<pixelblaze-ip>", "interactive": bool}
+    {"type": "start", "ip": "<pixelblaze-ip>",
+     "interactive": bool,           # pause on each miss for manual retry/skip
+     "settleMs": int,               # wait after lighting an LED before capture
+     "confirm": int,                # reads that must agree to accept a position
+     "cleanup": int}                # extra passes over missed LEDs at the end
     <binary JPEG>                         # sent in reply to a "capture" request
     {"type": "retry"} | {"type": "skip"}  # reply to a "retry_prompt" (interactive)
 
@@ -15,7 +19,8 @@ WebSocket protocol (text frames are JSON, binary frames are JPEG images):
     {"type": "hello", "pixelCount": N}
     {"type": "capture", "purpose": "background"|"lit", "pixel": n}
     {"type": "retry_prompt", "pixel": n}  # a miss; interactive mode only
-    {"type": "progress", "pixel": n, "total": N, "centers": [[x,y], ...]}
+    {"type": "progress", "centers": [[x,y], ...], "found": f, "total": N,
+     "label": "..."}                      # centers use [-1,-1] for not-yet-found
     {"type": "done", "map": [[x,y], ...], "missed": k, "center": [cx, cy]}
     {"type": "error", "message": "..."}
 """

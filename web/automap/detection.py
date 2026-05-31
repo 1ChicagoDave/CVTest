@@ -1,12 +1,16 @@
 """Camera-independent LED detection.
 
-This is the same algorithm CVTest.py uses, extracted so it can run on frames
-that arrive over a WebSocket (decoded from JPEG) instead of being pulled from
-cv2.VideoCapture. The numeric parameters and the threshold/contour pipeline are
-kept identical to the desktop tool so results match.
+This is the same per-frame algorithm CVTest.py uses, extracted so it can run on
+frames that arrive over a WebSocket (decoded from JPEG) instead of being pulled
+from cv2.VideoCapture. The numeric parameters and the threshold/contour pipeline
+are kept identical to the desktop tool so single-frame results match.
+
+The web tool adds redundancy on top of this: the server reads each LED several
+times and uses cluster_center() to accept a position only once enough reads
+agree (averaging them), which rejects noise and improves accuracy.
 
 Note: the area thresholds (min_area / max_area) are tuned for 640x480 frames,
-so the browser front-end downscales captures to that size before sending.
+so the browser front-end center-crops/downscales captures to that size.
 """
 import cv2
 import numpy as np

@@ -7,6 +7,11 @@ in on machine learning and the phone app thing.  It will not be regularly mainta
 Automap uses a webcam to map LED positions in 2D.  It works with the Pixelblaze to step sequentially through each LED,
 and generates a map file which can be imported into the Pixelblaze mapping tab.
 
+> **Browser / phone-camera version:** there is now a web-based version in [`web/`](web/) that lets you
+> map using a phone camera (e.g. an iPhone over Tailscale) instead of a laptop webcam, reusing this same
+> detection. See [`web/README.md`](web/README.md) to run it and [`docs/web-automap-vision.md`](docs/web-automap-vision.md)
+> for the design.
+
 ### This code implements some of the core Automap ideas:
 - it is fairly robust with regard to lighting conditions, even if they change during a run
 - it implements adaptive thresholding and contour detection for improved detection reliability
