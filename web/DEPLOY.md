@@ -8,6 +8,20 @@ valid HTTPS cert (which is what the phone camera requires) via `tailscale serve`
  iPhone (on tailnet) ──HTTPS/WSS──▶ tailscale serve ──▶ bridge :8000 (Docker, host net) ──ws://──▶ Pixelblaze
 ```
 
+## Quick start
+
+On the **Linux Docker VM** (on the Pixelblaze LAN and the tailnet):
+
+```bash
+cd web
+docker compose up -d --build                  # build + run the bridge on :8000
+sudo tailscale serve --bg http://localhost:8000
+tailscale serve status                        # prints the https://<vm>.<tailnet>.ts.net URL
+```
+
+Then open that `https://…ts.net/` URL on the iPhone. Tap to enable the camera,
+enter the Pixelblaze IP, Start. Details and troubleshooting below.
+
 ## Prerequisites
 
 - The **Docker VM** is on the same LAN as the Pixelblaze **and** joined to your
@@ -28,7 +42,9 @@ docker compose up -d --build
 
 `network_mode: host` (see `docker-compose.yml`) means the container shares the
 VM's network: it can reach `ws://<pixelblaze-ip>:81` on the LAN, and it listens
-on the VM's own `:8000`.
+on the VM's own `:8000`. **This relies on a Linux host** — host networking
+behaves differently on Docker Desktop for macOS/Windows, where the container
+can't reach a LAN device this way. Your Linux VM is exactly the right target.
 
 Verify it's up locally on the VM:
 
@@ -75,6 +91,8 @@ docker compose down              # stop the bridge
 - **`tailscaled` location.** Running it on the VM host (recommended) keeps
   networking simple. Running Tailscale *inside* the container is possible but
   needs `--cap-add=NET_ADMIN` and a `tailscaled` sidecar — unnecessary here.
-- **Off-tailnet access** (phone not on the tailnet) is the optional Hostinger
-  relay path in the vision doc, or `tailscale funnel` for brief public exposure.
+- **Add to Home Screen:** in Safari, Share → "Add to Home Screen" installs it as
+  a full-screen app (manifest + icons are included).
+- **Off-tailnet access** (phone not on the tailnet) isn't needed for the normal
+  flow; `tailscale funnel` can expose it publicly for a one-off if ever required.
 - **Rebuild after code changes:** `docker compose up -d --build`.

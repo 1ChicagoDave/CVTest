@@ -9,6 +9,13 @@ const $ = (id) => document.getElementById(id);
 const video = $("video"), overlay = $("overlay"), capture = $("capture");
 const statusEl = $("status"), barFill = $("bar").firstElementChild;
 const ipInput = $("ip"), interactiveBox = $("interactive");
+const settleInput = $("settle"), confirmInput = $("confirm"), cleanupInput = $("cleanup");
+
+// Parse a number input, falling back to a default and clamping to a range.
+function numInput(el, def, lo, hi) {
+  const v = parseInt(el.value, 10);
+  return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def;
+}
 
 const capCtx = capture.getContext("2d", { willReadFrequently: true });
 const ovCtx = overlay.getContext("2d");
@@ -163,8 +170,8 @@ function connect() {
         showPanel("retry");
         break;
       case "progress":
-        setStatus(`Pixel ${msg.pixel + 1} of ${msg.total}`);
-        setProgress(msg.pixel + 1, msg.total);
+        setStatus(msg.label);
+        setProgress(msg.found, msg.total);
         drawOverlay(msg.centers, false);
         if (!paused) showPanel("mapping"); // back from a retry prompt
         break;
@@ -222,7 +229,13 @@ $("startBtn").addEventListener("click", () => {
   const ip = ipInput.value.trim();
   if (!ip) { setStatus("Enter the Pixelblaze IP first."); return; }
   localStorage.setItem("pb_ip", ip);
-  pendingStart = { type: "start", ip, interactive: interactiveBox.checked };
+  pendingStart = {
+    type: "start", ip,
+    interactive: interactiveBox.checked,
+    settleMs: numInput(settleInput, 150, 0, 2000),
+    confirm: numInput(confirmInput, 2, 1, 5),
+    cleanup: numInput(cleanupInput, 3, 0, 6),
+  };
   runState = "mapping";
   reconnectAttempts = 0;
   resetPauseUI();

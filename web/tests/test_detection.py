@@ -6,6 +6,7 @@ import pytest
 
 from automap.detection import (
     LedDetector,
+    cluster_center,
     frame_to_grayscale,
     map_center,
     rotate_led_centers,
@@ -78,3 +79,24 @@ def test_rotate_full_turn_is_identity():
 def test_map_center_ignores_missing():
     assert map_center([[0, 0], [10, 10], [-1, -1]]) == (5, 5)
     assert map_center([[-1, -1]]) == (0, 0)
+
+
+def test_cluster_center_confirms_agreement():
+    c = cluster_center([(100, 100), (102, 101)], tolerance=8, min_count=2)
+    assert c is not None
+    assert abs(c[0] - 101) <= 1 and abs(c[1] - 100) <= 1
+
+
+def test_cluster_center_rejects_disagreement():
+    assert cluster_center([(100, 100), (200, 200)], tolerance=8, min_count=2) is None
+
+
+def test_cluster_center_discards_outlier():
+    # Two agreeing reads + one outlier -> cluster of the two.
+    c = cluster_center([(100, 100), (101, 101), (300, 300)], tolerance=8, min_count=2)
+    assert c is not None
+    assert abs(c[0] - 100) <= 2 and abs(c[1] - 100) <= 2
+
+
+def test_cluster_center_needs_min_count():
+    assert cluster_center([(100, 100)], tolerance=8, min_count=2) is None

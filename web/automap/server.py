@@ -7,7 +7,11 @@ Pixelblaze is driven on the LAN.
 WebSocket protocol (text frames are JSON, binary frames are JPEG images):
 
   client -> server
-    {"type": "start", "ip": "<pixelblaze-ip>", "interactive": bool}
+    {"type": "start", "ip": "<pixelblaze-ip>",
+     "interactive": bool,           # pause on each miss for manual retry/skip
+     "settleMs": int,               # wait after lighting an LED before capture
+     "confirm": int,                # reads that must agree to accept a position
+     "cleanup": int}                # extra passes over missed LEDs at the end
     <binary JPEG>                         # sent in reply to a "capture" request
     {"type": "retry"} | {"type": "skip"}  # reply to a "retry_prompt" (interactive)
 
@@ -15,7 +19,8 @@ WebSocket protocol (text frames are JSON, binary frames are JPEG images):
     {"type": "hello", "pixelCount": N}
     {"type": "capture", "purpose": "background"|"lit", "pixel": n}
     {"type": "retry_prompt", "pixel": n}  # a miss; interactive mode only
-    {"type": "progress", "pixel": n, "total": N, "centers": [[x,y], ...]}
+    {"type": "progress", "centers": [[x,y], ...], "found": f, "total": N,
+     "label": "..."}                      # centers use [-1,-1] for not-yet-found
     {"type": "done", "map": [[x,y], ...], "missed": k, "center": [cx, cy]}
     {"type": "error", "message": "..."}
 """
@@ -27,22 +32,36 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from .detection import LedDetector, frame_to_grayscale, map_center
+from .detection import LedDetector, cluster_center, frame_to_grayscale, map_center
 from .pixelblaze_driver import default_controller_factory
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
-def create_app(controller_factory=default_controller_factory, settle_seconds: float = 0.08) -> FastAPI:
+def create_app(
+    controller_factory=default_controller_factory,
+    settle_seconds: float = 0.15,
+    confirm_samples: int = 2,
+    cleanup_passes: int = 3,
+    confirm_tolerance: int = 8,
+) -> FastAPI:
     """Build the FastAPI app.
 
     controller_factory(ip) -> PixelController lets tests inject a fake device.
-    settle_seconds is how long to wait after changing the lit pixel before
-    asking the phone for a frame (lets the LED/display and auto-exposure settle).
+    settle_seconds: wait after changing the lit pixel before asking for a frame
+      (lets the LED and the camera's auto-exposure settle). Default raised to
+      give more reliable captures; the client can override it per run.
+    confirm_samples: how many agreeing reads are required to accept a position.
+    cleanup_passes: how many extra passes to run over the missed LEDs at the end.
+    confirm_tolerance: max pixel distance for two reads to count as "agreeing".
+    These are defaults; the client may override settle/confirm/cleanup per run.
     """
     app = FastAPI()
     app.state.controller_factory = controller_factory
     app.state.settle_seconds = settle_seconds
+    app.state.confirm_samples = confirm_samples
+    app.state.cleanup_passes = cleanup_passes
+    app.state.confirm_tolerance = confirm_tolerance
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
@@ -63,9 +82,19 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
                 )
                 return
 
-            # When interactive, pause on a miss and let the user retry or skip;
-            # otherwise auto-skip (tag [-1,-1]) like the desktop tool.
+            # Per-run tunables (clamped); fall back to the app defaults.
+            def _clamp(v, lo, hi):
+                return max(lo, min(hi, v))
+
             interactive = bool(start.get("interactive", False))
+            settle = _clamp(
+                float(start.get("settleMs", app.state.settle_seconds * 1000)) / 1000.0,
+                0.0, 2.0,
+            )
+            confirm = int(_clamp(int(start.get("confirm", app.state.confirm_samples)), 1, 5))
+            cleanup = int(_clamp(int(start.get("cleanup", app.state.cleanup_passes)), 0, 6))
+            tolerance = app.state.confirm_tolerance
+            max_reads = confirm + 3  # allow a few failed/disagreeing reads per LED
 
             # Hardware control is blocking; keep it off the event loop.
             controller = await asyncio.to_thread(app.state.controller_factory, ip)
@@ -73,8 +102,8 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
             await websocket.send_json({"type": "hello", "pixelCount": count})
 
             detector = LedDetector()
-            centers: list[list[int]] = []
-            missed = 0
+            centers: list = [None] * count  # (x, y) once confirmed, else None
+            found = 0
 
             async def grab(purpose: str, pixel: int):
                 await websocket.send_json(
@@ -84,49 +113,83 @@ def create_app(controller_factory=default_controller_factory, settle_seconds: fl
                 return frame_to_grayscale(data)
 
             async def capture_and_detect(pixel: int):
-                # Background frame with everything off, then the lit LED.
+                # Blink the LED (off -> background, on -> lit) and detect.
                 await asyncio.to_thread(controller.all_off)
-                await asyncio.sleep(app.state.settle_seconds)
+                await asyncio.sleep(settle)
                 background = await grab("background", -1)
                 await asyncio.to_thread(controller.light, pixel)
-                await asyncio.sleep(app.state.settle_seconds)
+                await asyncio.sleep(settle)
                 lit = await grab("lit", pixel)
                 center, _info = detector.detect_pixel(background, lit)
                 return center
 
-            for n in range(count):
-                while True:
-                    center = await capture_and_detect(n)
-                    if center is not None:
-                        centers.append([int(center[0]), int(center[1])])
-                        break
+            async def attempt_pixel(pixel: int):
+                # Read the LED repeatedly; accept once `confirm` reads agree.
+                points = []
+                for _ in range(max_reads):
+                    c = await capture_and_detect(pixel)
+                    if c is not None:
+                        points.append((c[0], c[1]))
+                        agreed = cluster_center(points, tolerance, confirm)
+                        if agreed is not None:
+                            return agreed
+                return None
 
-                    # Miss. In interactive mode, ask the user what to do.
-                    if interactive:
-                        await websocket.send_json({"type": "retry_prompt", "pixel": n})
-                        resp = await websocket.receive_json()
-                        if resp.get("type") == "retry":
-                            continue  # re-light, re-capture, re-detect
-                    centers.append([-1, -1])
-                    missed += 1
-                    break
+            def overlay_centers():
+                return [list(c) if c is not None else [-1, -1] for c in centers]
 
+            async def send_progress(label: str):
                 await websocket.send_json(
                     {
                         "type": "progress",
-                        "pixel": n,
+                        "centers": overlay_centers(),
+                        "found": found,
                         "total": count,
-                        "centers": centers,
+                        "label": label,
                     }
                 )
 
+            # --- Main pass ---
+            for n in range(count):
+                center = await attempt_pixel(n)
+                if center is None and interactive:
+                    while True:  # let the user retry or skip this LED
+                        await websocket.send_json({"type": "retry_prompt", "pixel": n})
+                        resp = await websocket.receive_json()
+                        if resp.get("type") != "retry":
+                            break  # skip
+                        center = await attempt_pixel(n)
+                        if center is not None:
+                            break
+                if center is not None:
+                    centers[n] = center
+                    found += 1
+                await send_progress(f"Pixel {n + 1} of {count}")
+
+            # --- Cleanup passes: re-try only the missed LEDs ---
+            for p in range(cleanup):
+                missing = [i for i, c in enumerate(centers) if c is None]
+                if not missing:
+                    break
+                for i in missing:
+                    center = await attempt_pixel(i)
+                    if center is not None:
+                        centers[i] = center
+                        found += 1
+                    remaining = sum(1 for c in centers if c is None)
+                    await send_progress(
+                        f"Cleanup pass {p + 1}/{cleanup}: {remaining} missing"
+                    )
+
             await asyncio.to_thread(controller.all_off)
 
-            cx, cy = map_center(centers)
+            final = overlay_centers()
+            missed = sum(1 for c in centers if c is None)
+            cx, cy = map_center(final)
             await websocket.send_json(
                 {
                     "type": "done",
-                    "map": centers,
+                    "map": final,
                     "missed": missed,
                     "center": [cx, cy],
                 }

@@ -1,8 +1,11 @@
 # Vision: Browser-Based Automap (use an iPhone camera for LED mapping)
 
-> **Status: design / vision only.** This document describes what a web-accessible version of CVTest
-> would look like, the one real technical obstacle, and how the chosen architecture solves it.
-> Implementation would be a follow-up, scoped separately. No code follows directly from this doc.
+> **Status: BUILT.** This document is the original design. The web tool described here is implemented
+> in [`../web/`](../web/) and has been used successfully to map a real strip from an iPhone over Tailscale.
+> For how to run it, see [`../web/README.md`](../web/README.md) and [`../web/DEPLOY.md`](../web/DEPLOY.md).
+> Two robustness features were added beyond this original design after the first real run: reading each
+> LED multiple times and accepting a position only once the reads agree (confirmation), and automatic
+> cleanup passes that re-try missed LEDs at the end. The detection itself remains the CVTest algorithm.
 
 ## Context — why this is wanted
 
